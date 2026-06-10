@@ -1,0 +1,150 @@
+#include <Wire.h>
+#include <Adafruit_MMA8451.h>
+#include <Adafruit_Sensor.h>
+#include <BleKeyboard.h>
+
+
+// BLE keyboard setup
+BleKeyboard bleKeyboard("GestureController");
+
+
+// MMA8451 accelerometer
+Adafruit_MMA8451 mma = Adafruit_MMA8451();
+
+
+// Sensor pin and thresholds
+const int flexPin = 12;
+const int flexThreshold = 3000;
+
+
+// Baselines
+float baselineX = 0;
+float baselineZ = 0;
+
+
+// Gesture thresholds
+const float FORCE_THRESHOLD_X = 3.5;  
+const float FORCE_THRESHOLD_Z = 5.0;
+
+
+
+
+
+
+
+
+
+
+// Fallback mode
+bool mockMode = false;
+
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  Serial.println("Booting...");
+
+
+  // BLE start
+  Serial.println("Initializing BLE...");
+  bleKeyboard.begin();
+  delay(100);
+  Serial.println("BLE initialized.");
+
+
+  // Sensor init
+  Serial.println("Initializing MMA8451...");
+  if (!mma.begin()) {
+    Serial.println("Sensor not detected. Switching to mock mode.");
+    mockMode = true;
+  } else {
+    Serial.println("MMA8451 detected.");
+
+
+    mma.setRange(MMA8451_RANGE_4_G);
+
+
+    // Calibrate with averaged samples
+    Serial.println("Calibrating... Hold arm in neutral position.");
+    delay(500);  
+    sensors_event_t event;
+    float sumX = 0, sumZ = 0;
+    for (int i = 0; i < 20; i++) {
+      mma.getEvent(&event);
+      sumX += event.acceleration.x;
+      sumZ += event.acceleration.z;
+      delay(50);
+    }
+    baselineX = sumX / 20;
+    baselineZ = sumZ / 20;
+
+
+    Serial.println("Calibration complete.");
+    Serial.print("Baseline X: ");
+    Serial.println(baselineX);
+    Serial.print("Baseline Z: ");
+    Serial.println(baselineZ);
+  }
+}
+
+
+void loop() {
+  if (!bleKeyboard.isConnected()) return;
+
+
+  float deltaX, deltaZ;
+  int flexValue;
+
+
+  if (mockMode) {
+    // Simulated values
+    deltaX = 4.2;      // Simulate tilt right
+    deltaZ = 6.0;      // Simulate raised arm
+    flexValue = 3500;  // Simulate strong bend
+  } else {
+    sensors_event_t event;
+    mma.getEvent(&event);
+    deltaX = event.acceleration.x - baselineX;
+    deltaZ = event.acceleration.z - baselineZ;
+    flexValue = analogRead(flexPin);
+  }
+
+
+  Serial.print("ΔX: ");
+  Serial.print(deltaX);
+  Serial.print(" | ΔZ: ");
+  Serial.print(deltaZ);
+  Serial.print(" | Flex: ");
+  Serial.println(flexValue);
+
+
+  // Right tilt (D)
+  if (deltaX > FORCE_THRESHOLD_X) bleKeyboard.press('d');
+  else bleKeyboard.release('d');
+
+
+  // Left tilt (A)
+  if (deltaX < -FORCE_THRESHOLD_X) bleKeyboard.press('a');
+  else bleKeyboard.release('a');
+
+
+  // Raise (S)
+  if (deltaZ < -FORCE_THRESHOLD_Z) bleKeyboard.press('s');
+  else bleKeyboard.release('s');
+
+
+  if (deltaZ > FORCE_THRESHOLD_Z) bleKeyboard.press('w');
+  else bleKeyboard.release('w');
+
+
+
+
+  // Flex tracking logic
+  if (flexValue == 0) bleKeyboard.press(' ');
+  else bleKeyboard.release(' ');
+
+
+
+
+  delay(100);
+}
